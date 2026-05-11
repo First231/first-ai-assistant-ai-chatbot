@@ -1,13 +1,32 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 from datetime import datetime
 
 app = FastAPI()
 
+# =========================
+# CORS
+# =========================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# =========================
+# DATABASE
+# =========================
+
 def init_db():
     conn = sqlite3.connect("database.db")
+
     c = conn.cursor()
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS chat (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,42 +35,70 @@ def init_db():
             timestamp TEXT
         )
     """)
+
     conn.commit()
     conn.close()
 
 init_db()
 
-@app.get("/", response_class=HTMLResponse)
+# =========================
+# SHOW FRONTEND
+# =========================
+
+@app.get("/")
 async def home():
-    return """
-    <html>
-        <body style="background:#111;color:white;font-family:sans-serif;">
-            <h1>AI Chat</h1>
-            <form method="post" action="/chat">
-                <input name="message" style="width:300px;">
-                <button type="submit">Send</button>
-            </form>
-        </body>
-    </html>
-    """
+    return FileResponse("index.html")
+
+# =========================
+# CHAT API
+# =========================
 
 @app.post("/chat")
 async def chat(request: Request):
-    form = await request.form()
-    user_message = form["message"]
+
+    data = await request.json()
+
+    user_message = data.get("message")
 
     conn = sqlite3.connect("database.db")
+
     c = conn.cursor()
 
-    c.execute("INSERT INTO chat (role, message, timestamp) VALUES (?, ?, ?)",
-              ("user", user_message, str(datetime.now())))
+    c.execute(
+        "INSERT INTO chat (role, message, timestamp) VALUES (?, ?, ?)",
+        ("user", user_message, str(datetime.now()))
+    )
 
+    # AI RESPONSE
     bot_reply = f"คุณพิมพ์ว่า: {user_message}"
 
-    c.execute("INSERT INTO chat (role, message, timestamp) VALUES (?, ?, ?)",
-              ("bot", bot_reply, str(datetime.now())))
+    c.execute(
+        "INSERT INTO chat (role, message, timestamp) VALUES (?, ?, ?)",
+        ("bot", bot_reply, str(datetime.now()))
+    )
 
     conn.commit()
     conn.close()
 
-    return HTMLResponse(f"<h2>{bot_reply}</h2><a href='/'>กลับ</a>")
+    return JSONResponse({
+        "response": bot_reply
+    })
+
+# =========================
+# LOAD HISTORY
+# =========================
+
+@app.get("/history")
+async def history():
+
+    conn = sqlite3.connect("database.db")
+
+    c = conn.cursor()
+
+    c.execute("SELECT role, message, timestamp FROM chat")
+
+    rows = c.fetchall()
+
+    conn.close()
+
+    return rows
